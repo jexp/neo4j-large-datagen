@@ -17,16 +17,16 @@ export DB=/path/to/transfers/graph.db
 
 ----
 $JAVA_HOME/bin/javac AccountFileGenerator.java
-# $JAVA_HOME/bin/java AccountFileGenerator <total> <files>
+# $JAVA_HOME/bin/java AccountFileGenerator <files> <total>
 # eg.
-$JAVA_HOME/bin/java AccountFileGenerator 100000000 100
+$JAVA_HOME/bin/java AccountFileGenerator 100 1000000000
 ----
 
 ----
 $JAVA_HOME/bin/javac TransactionFileGenerator.java
-# $JAVA_HOME/bin/java TransactionFileGenerator <total> <files>
-# eg.
-$JAVA_HOME/bin/java TransactionFileGenerator 100000000 100
+# $JAVA_HOME/bin/java TransactionFileGenerator <batch> <files> 
+# eg. total = batch * files
+$JAVA_HOME/bin/java TransactionFileGenerator 100000000 300
 ----
 
 The resulting CSV files are all gzipped, which the import tool can handle without any issues.
