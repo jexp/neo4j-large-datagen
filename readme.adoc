@@ -1,0 +1,107 @@
+= Data Generator for Large Neo4j Stores
+
+The domain model is a Money transfer graph `+(:Account)-[:TRANSFER]->(:Account)+` or  `+(:Account)<-[:FROM]-(:TRANSFER)-[:TO]->(:Account)+`
+
+There are two generators one for accounts, one for transfers.
+You provide them with a total number and a number of files it should generate which also determines concurrency.
+E.g. 100 files for 1bn accounts writes 10M accounts per file.
+
+
+== Usage
+
+----
+export NEO=/path/to/neo4j-enterprise-3.5.0
+export JAVA_HOME=/usr/lib/jvm/java-8-oracle
+export DB=/path/to/transfers/graph.db
+----
+
+----
+$JAVA_HOME/bin/javac AccountFileGenerator.java
+# $JAVA_HOME/bin/java AccountFileGenerator <total> <files>
+# eg.
+$JAVA_HOME/bin/java AccountFileGenerator 100000000 100
+----
+
+----
+$JAVA_HOME/bin/javac TransactionFileGenerator.java
+# $JAVA_HOME/bin/java TransactionFileGenerator <total> <files>
+# eg.
+$JAVA_HOME/bin/java TransactionFileGenerator 100000000 100
+----
+
+The resulting CSV files are all gzipped, which the import tool can handle without any issues.
+
+On a machine with 144 CPUs I can write a
+
+== Import
+
+To use the generated CSV files with neo4j-import you have to create appropriate header files.
+
+Depending on which data model you want to use you can either treat transaction as Node or Relationship.
+If you're only interested in graph structure (e.g. for graph algorithm testing), you can _ignore_ the properties like `id`, `time` or `value`
+
+=== Transaction as Relationship
+
+
+=== Only Transaction Nodes for Indexing Testing
+
+----
+echo 'id:ID,:IGNORE,:IGNORE,value:INT,time:LONG' > transaction.hdr
+----
+
+----
+# import of 1bn tx only
+$NEO/bin/neo4j-import --into $DB --stacktrace true --skip-duplicate-nodes true   --skip-bad-relationships true  --ignore-empty-strings true --bad-tolerance true \
+--id-type string --db-config neo4j.conf --ignore-extra-columns true --skip-bad-entries-logging true \
+--nodes:Transaction transaction.hdr,'data/1-payment-1.*\.csv\.gz'
+----
+
+=== Transaction as Node
+
+---
+echo 'id:ID' > account.hdr
+echo 'id:ID,:IGNORE,:IGNORE,value:INT,time:LONG' > transaction.hdr
+echo ':START_ID,:END_ID,:IGNORE,:IGNORE,:IGNORE' > sender.hdr
+echo ':START_ID,:IGNORE,:END_ID,:IGNORE,:IGNORE' > receiver.hdr
+# for stores > 38bn nodes
+echo 'dbms.record_format=high_limit' > neo4j.conf
+----
+
+
+----
+rm -rf $DB
+$NEO/bin/neo4j-import --into $DB --stacktrace true --skip-duplicate-nodes true   --skip-bad-relationships true  --ignore-empty-strings true --bad-tolerance true \
+--id-type string --db-config neo4j.conf --ignore-extra-columns true --skip-bad-entries-logging true \
+--nodes:Transaction transaction.hdr,'data/payment-.*\.csv\.gz' --nodes:Account account.hdr,'data/account-.*\.csv\.gz' \
+--relationships:SENDER sender.hdr,'data/payment-.*\.csv\.gz' --relationships:RECEIVER receiver.hdr,'data/payment-.*\.csv\.gz' --max-memory 100%
+----
+
+== Modifications & Implementation
+
+The code uses one thread per file, and a fixed-length byte-array for the data, which is modified in-place for each line to write.
+
+Currently the Range of id's and values to generate is hardcoded in the Java files for optimal performance.
+
+It uses (depending) a random of range of numbers to write per digit. For all non-leading digits the range is `0..9`.
+For the leading digits, it's depending on the total scale, e.g. 0..1 for `up < 2xxxx` (e.g. 00000 to 19999) or 0..5 for `< 6xxxx`.
+
+The increment of `k` moves over the byte array. So if you need different id-ranges e.g. 2.3bn you have to adjust the first 2 leading digits to 0..1 and 0..2 respectively.
+
+.Example from TransactionFileGenerator
+[source,java]
+----
+// sender account id <= 219999999999
+bytes[k++]=numbers[random.nextInt(3)];
+bytes[k++]=numbers[random.nextInt(10)];
+while (k!=23) bytes[k++]=numbers[random.nextInt(10)];
+----
+
+== Accessing the store
+
+If you're on a machine where you don't want to start up a Neo4j server you can use this:
+
+----
+JAVA_OPTS="-Xmn4G -Xmx450G -Xms450G -Xss1M -XX:+UseG1GC -XX:+PrintGCDetails -XX:+PrintGCDateStamps -XX:+PrintGCApplicationStoppedTime -XX:+PrintPromotionFailure -XX:+PrintTenuringDistribution -Xloggc:$DB/logs/gc.log" $NEO/bin/neo4j-shell -config /mnt/ssd/algo/neo4j.conf -path $DB
+----
+
+In Neo4j 3.4.x you have to symlink the `plugins` (e.g. for APOC) directory into the db directory, in 3.5.x on level up.
