@@ -1,0 +1,240 @@
+#original tranfers import
+neo4j-import  --into /tmp/neo4j-enterprise-3.2.1/data/databases/AuthGraph_201701to03_trxn.db --stacktrace true  --max-read-buffers 20G  --skip-duplicate-nodes true   --skip-bad-relationships true  --ignore-empty-strings true  --max-memory 90%  --bad-tolerance 30000000 \
+--nodes ${ndir}/transaction.csv.new
+
+
+# csv data im /data/tranfers/[123]-payment-*.csv.gz (transactions, 30bn) and /data/tranfers/account-*.csv.gz (accounts 2.3bn)
+# target database in /mnt/ssd/tranfers/tranfers.db
+
+
+# headers
+#echo 'id:ID,:IGNORE,:IGNORE,value:INT,time:LONG' > transaction.hdr
+echo 'id:ID,:IGNORE,:IGNORE,value:IGNORE,time:IGNORE' > transaction.hdr
+echo 'id:ID' > account.hdr
+echo ':START_ID,:END_ID,:IGNORE,:IGNORE,:IGNORE' > sender.hdr
+echo ':START_ID,:IGNORE,:END_ID,:IGNORE,:IGNORE' > receiver.hdr
+
+echo [1]-payment-1*.csv.gz | tr ' ' ','
+
+echo 'id:ID,:IGNORE,:IGNORE,value:INT,time:LONG' > transaction.hdr
+echo 'id:ID' > account.hdr
+echo ':START_ID,:END_ID,:IGNORE,:IGNORE,:IGNORE' > sender.hdr
+echo ':START_ID,:IGNORE,:END_ID,:IGNORE,:IGNORE' > receiver.hdr
+echo 'dbms.record_format=high_limit' > neo4j.conf
+
+export NEO=/mnt/ssd/neo4j-enterprise-3.2.1
+export JAVA_HOME=/usr/lib/jvm/java-8-oracle
+export DB=/mnt/pcie-ssd/tranfers/tranfers.db
+rm -rf $DB
+# import of 1bn tx only
+$NEO/bin/neo4j-import --into $DB --stacktrace true --skip-duplicate-nodes true   --skip-bad-relationships true  --ignore-empty-strings true --bad-tolerance true \
+--id-type string --db-config neo4j.conf --ignore-extra-columns true --skip-bad-entries-logging true \
+--nodes:Transaction transaction.hdr,'data/1-payment-1.*\.csv\.gz'
+
+IMPORT DONE in 27m 45s 764ms. 
+Imported:
+  1099994540 nodes
+  0 relationships
+  3300000000 properties
+Peak memory usage: 23.01 GB
+
+export NEO=/mnt/ssds/tranfers/neo4j
+export JAVA_HOME=/usr/lib/jvm/java-8-oracle
+export DB=/mnt/ssds/tranfers/tranfers.db
+
+export NEO=/mnt/ssd/neo4j-enterprise-3.2.1
+export JAVA_HOME=/usr/lib/jvm/java-8-oracle
+export DB=/mnt/pcie-ssd/tranfers/tranfers.db
+rm -rf $DB
+# import of 30bn tx only
+$NEO/bin/neo4j-import --into $DB --stacktrace true --skip-duplicate-nodes true   --skip-bad-relationships true  --ignore-empty-strings true --bad-tolerance true \
+--id-type string --db-config neo4j.conf --ignore-extra-columns true --skip-bad-entries-logging true \
+--nodes:Transaction transaction.hdr,'data/payment-.*.csv.gz' --max-memory 100%
+
+
+# full import of 1bn tx 750M users 2bn rels
+
+rm -rf $DB
+$NEO/bin/neo4j-import --into $DB --stacktrace true --skip-duplicate-nodes true   --skip-bad-relationships true  --ignore-empty-strings true --bad-tolerance true \
+--id-type string --db-config neo4j.conf --ignore-extra-columns true --skip-bad-entries-logging true \
+--nodes:Transaction transaction.hdr,'data/payment-.*\.csv\.gz' --nodes:Account account.hdr,'data/account-.*\.csv\.gz' \
+--relationships:SENDER sender.hdr,'data/payment-.*\.csv\.gz' --relationships:RECEIVER receiver.hdr,'data/payment-.*\.csv\.gz' --max-memory 100%
+
+cd /mnt
+mv payment-* /mnt/data
+export NEO=/mnt/neo4j-enterprise-3.2.2
+export NEO=/mnt/neo4j-enterprise-3.3.0-alpha05
+export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64
+export DB=/db2/tranfers.db
+echo 'id:ID,:IGNORE,:IGNORE,value:INT,time:LONG' > transaction.hdr
+echo 'id:ID' > account.hdr
+echo ':START_ID,:END_ID,:IGNORE,:IGNORE,:IGNORE' > sender.hdr
+echo ':START_ID,:IGNORE,:END_ID,:IGNORE,:IGNORE' > receiver.hdr
+echo 'dbms.record_format=high_limit' > neo4j.conf
+
+rm -rf $DB/*
+$NEO/bin/neo4j-import --into $DB --stacktrace true --skip-duplicate-nodes true --skip-bad-relationships true  --ignore-empty-strings true --bad-tolerance true \
+--id-type string --db-config neo4j.conf --ignore-extra-columns true --skip-bad-entries-logging true \
+--nodes:Transaction transaction.hdr,'data/payment-.*\.csv\.gz' --nodes:Account account.hdr,'data/account-.*\.csv\.gz' \
+--relationships:SENDER sender.hdr,'data/payment-.*\.csv\.gz' --relationships:RECEIVER receiver.hdr,'data/payment-.*\.csv\.gz' --high-io --max-memory 750G
+
+export NEO=/mnt/ssds/tranfers/neo4j-enterprise
+export DB=/mnt/ssds/tranfers/tranfers.db
+echo 'id:ID,:IGNORE,:IGNORE,value:INT,time:LONG' > transaction.hdr
+echo 'id:ID' > account.hdr
+echo ':START_ID,:END_ID,:IGNORE,:IGNORE,:IGNORE' > sender.hdr
+echo ':START_ID,:IGNORE,:END_ID,:IGNORE,:IGNORE' > receiver.hdr
+echo 'dbms.record_format=high_limit' > neo4j.conf
+
+rm -rf $DB/*
+
+# 30bn tx only
+$NEO/bin/neo4j-import --into $DB --stacktrace true --skip-duplicate-nodes true   --skip-bad-relationships true  --ignore-empty-strings true --bad-tolerance true \
+--id-type string --db-config neo4j.conf --ignore-extra-columns true --skip-bad-entries-logging true \
+--nodes:Transaction transaction.hdr,'data/1-payment-[5-9]\d.csv.gz' --max-memory 80G
+
+ls -1 payment*.gz | xargs -P 20 -n 1 -I § mv § /data/tranfers/1-§
+ls -1 account*.gz | xargs -P 20 -n 1 -I § mv § /data/tranfers/§
+
+
+# data generation, transactions
+
+# run this 3 times
+# 10bn tx total 100 in parallel, ~ 250G gz files per run
+java  TransactionFileGenerator 100000000 100 
+
+ls -1 *.gz | xargs -P 20 -n 1 -I § mv § /data/tranfers/1-§
+ls -1 *.gz | wc -l -> 300 files
+
+export JAVA_HOME=/usr/lib/jvm/java-8-oracle
+export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64/
+$JAVA_HOME/bin/javac TransactionFileGenerator.java
+# 100M records per file 100 files -> 10bn tx
+
+$JAVA_HOME/bin/java AccountFileGenerator 100000000 100
+
+cat > TransactionFileGenerator.java << EOF
+import java.io.BufferedOutputStream;
+import java.io.FileOutputStream;
+import java.io.OutputStream;
+import java.io.PrintStream;
+import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.zip.GZIPOutputStream;
+
+public class TransactionFileGenerator {
+
+    private static final int MONTH = 90 * 24 * 3600;
+
+    public static void main(String[] args) {
+        long batch = Long.parseLong(args[0]);
+        int files = Integer.parseInt(args[1]);
+        long begin = System.currentTimeMillis() / 1000 - MONTH;
+        for (int i = 0; i < files; i++) {
+            int id = i;
+            new Thread(() -> {
+                ThreadLocalRandom random = ThreadLocalRandom.current();
+                byte[] chars = "ABCDEFGHIJKLMNOPQRSTUVWXZY-0123456789".getBytes();
+                byte[] numbers = "0123456789".getBytes();
+                // 0          12 14     22 24     32,34   40,42      51
+                // ABCDEFGHIJKLI,000000000,000000000,1000000,1498612701\n
+                byte[] bytes = "ABCDEFGHIJKLI,000000000,000000000,1000000,1498612701\n".getBytes();
+                try (OutputStream os = new GZIPOutputStream(new BufferedOutputStream(new FileOutputStream("payment-" + id + ".csv.gz"),1024*1024),1024*1024,false)) {
+                    for (long row = 0; row < batch; row++) {
+                        int k=0;
+                        // tx-id
+                        while (k != 13) bytes[k++]=chars[random.nextInt(37)];
+                        k++;
+                        // sender account id <= 219999999999
+                        bytes[k++]=numbers[random.nextInt(3)];
+                        bytes[k++]=numbers[random.nextInt(10)];
+                        while (k!=23) bytes[k++]=numbers[random.nextInt(10)];
+                        k++;
+                        // receiver account id <= 219999999999
+                        bytes[k++]=numbers[random.nextInt(3)];
+                        bytes[k++]=numbers[random.nextInt(10)];
+                        while (k!=33) bytes[k++]=numbers[random.nextInt(10)];
+                        k++;
+                        // amount full integers
+                        while (k!=41) bytes[k++]=numbers[random.nextInt(10)];
+                        k+=3;
+                        // date > 149000000
+                        while (k!=52) bytes[k++]=numbers[random.nextInt(10)];
+                        os.write(bytes);
+                        if (row % 1_000_000 == 0) {
+                            System.out.print(-id);
+                            os.flush();
+                        }
+                    }
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            }).start();
+        }
+        Thread.yield();
+    }
+}
+EOF
+
+# data generation, accounts
+
+cat > AccountFileGenerator.java << EOF
+import java.io.BufferedOutputStream;
+import java.io.FileOutputStream;
+import java.io.OutputStream;
+import java.util.zip.GZIPOutputStream;
+
+public class AccountFileGenerator {
+    public static void main(String[] args) {
+        int files = Integer.parseInt(args[0]);
+        long total = 2_300_000_000L;
+		if (args.length > 1) total = Long.parseLong(args[1]);
+        long chunk = total / files + (total % files > 0 ? 1 : 0);
+        for (int i = 0; i < files; i++) {
+            int id = i;
+            new Thread(() -> {
+                try (OutputStream os = new GZIPOutputStream(new BufferedOutputStream(new FileOutputStream("account-" + id + ".csv.gz"),1024*1024),1024*1024,false)) {
+                    for (long row = 0; row < chunk; row++) {
+                        os.write(Long.toString(row + id * chunk).getBytes());
+                        os.write('\n');
+                        if (row % 1_000_000 == 0) {
+                            System.out.print(-id);
+                            os.flush();
+                        }
+                    }
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            }).start();
+        }
+        Thread.yield();
+    }
+}
+EOF
+
+# export JAVA_HOME=/usr/lib/jvm/java-8-oracle
+$JAVA_HOME/bin/javac AccountFileGenerator.java TransactionFileGenerator.java
+$JAVA_HOME/bin/java AccountFileGenerator 100 3000000000
+$JAVA_HOME/bin/java TransactionFileGenerator 100000000 300
+
+export DB=/mnt/ssdbig/transfers600m-18bn.db
+export NEO=/mnt/ssd/neo4j-enterprise-3.2.5
+
+# export DB=/mnt/ssdbig/data/tranfers.db
+echo ':IGNORE,:START_ID,:END_ID,:IGNORE,:IGNORE' > transaction.hdr
+echo 'id:ID' > account.hdr
+echo "dbms.tx_log.rotation.retention_policy=false" > neo4j.conf
+
+rm -rf $DB/*
+$NEO/bin/neo4j-import --into $DB --stacktrace true --skip-duplicate-nodes true --skip-bad-relationships true  --ignore-empty-strings true --bad-tolerance true \
+--id-type actual --db-config neo4j.conf --ignore-extra-columns true --skip-bad-entries-logging true \
+--nodes:Account account.hdr,'account-.*\.csv\.gz' \
+--relationships:SENT transaction.hdr,'payment-.*\.csv\.gz' --high-io --max-memory 750G
+
+
+JAVA_OPTS="-Xmn4G -Xmx450G -Xms450G -Xss1M -XX:+UseG1GC -XX:+PrintGCDetails -XX:+PrintGCDateStamps -XX:+PrintGCApplicationStoppedTime -XX:+PrintPromotionFailure -XX:+PrintTenuringDistribution -Xloggc:$DB/logs/gc.log" $NEO/bin/neo4j-shell -config /mnt/ssd/algo/neo4j.conf -path $DB
+
+
+hatte der g1gc nicht die new size dynamisch verändert, je nach MaxGCPauseMillis? Vllt kannst du die hochstellen (default sind 200ms) und mit `-XX:+UnlockExperimentalVMOptions -XX:G1NewSizePercent=1 -XX:G1MaxNewSizePercent=1` auf 1% einschränken? mit war so dass g1gc gegen Xmn etwas allergisch reagiert und dann bestimmte sachen nicht mehr richtig macht, aber ich kann mich da auch irren
+
+-XX:+UnlockExperimentalVMOptions -XX:G1NewSizePercent=1 -XX:G1MaxNewSizePercent=1
